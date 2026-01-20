@@ -174,8 +174,9 @@ Configurar en: **Settings > CI/CD > Variables**
 | `APPDYNAMICS_APP_NAME` | Nombre de la aplicación | ✅ | ❌ |
 | `APPDYNAMICS_TIER_NAME` | Nombre del tier | ✅ | ❌ |
 | `APPDYNAMICS_NODE_NAME` | Nombre del nodo (puede usar CI variables) | ✅ | ❌ |
-| `APPDYNAMICS_RUM_APP_KEY` | RUM Application Key (opcional, para RUM) | ✅ | ✅ |
+| `APPDYNAMICS_RUM_APP_KEY` | RUM Application Key (opcional para pipelines con Server Agent, **requerido** para RUM-only) | ✅ | ✅ |
 | `APPDYNAMICS_RUM_BEACON_URL` | RUM Beacon URL (opcional) | ✅ | ❌ |
+| `IIS_APP_POOL_NAME` | Nombre del Application Pool de IIS (opcional, solo Windows) | ✅ | ❌ |
 
 **Variables útiles de GitLab CI:**
 - `CI_COMMIT_REF_NAME` - Nombre del branch
@@ -217,6 +218,28 @@ Ver archivo: [.gitlab-ci-dotnet-core.yml](.gitlab-ci-dotnet-core.yml)
 ### Ejemplo 4: .NET Core / .NET 5+ Standalone
 
 Ver archivo: [.gitlab-ci-standalone.yml](.gitlab-ci-standalone.yml)
+
+### Ejemplo 5: SOLO RUM (Sin Server Agent)
+
+Ver archivo: [.gitlab-ci-rum-only.yml](.gitlab-ci-rum-only.yml)
+
+**Características:**
+- ✅ **SOLO RUM** (monitoreo de frontend/browser)
+- ✅ **NO requiere** AppDynamics Server Agent instalado
+- ✅ Funciona con cualquier aplicación web (ASP.NET, .NET Core, HTML estático, etc.)
+- ✅ Generación automática de scripts RUM
+- ✅ Snippets de integración para ASP.NET y HTML genérico
+
+**Ideal para:**
+- Aplicaciones que solo necesitan monitoreo de frontend
+- Aplicaciones estáticas o con backend no instrumentado
+- Pruebas de RUM sin necesidad de Server Agent
+
+**Variables requeridas:**
+- `APPDYNAMICS_RUM_APP_KEY` - **Requerido** (RUM Application Key)
+- `APPDYNAMICS_CONTROLLER_HOST` - **Requerido** (Controller hostname)
+- `APPDYNAMICS_APP_NAME` - Opcional (default: "MyApplication")
+- `APPDYNAMICS_TIER_NAME` - Opcional (default: "Frontend")
 
 ---
 
@@ -299,10 +322,17 @@ El agente puede configurarse mediante:
 - ❌ Errores de JavaScript
 - 🌐 Llamadas AJAX/XHR
 
-**Para habilitar RUM:**
+### Opciones para RUM:
+
+**Opción 1: RUM con Server Agent (Monitoreo Completo)**
 1. Configura `APPDYNAMICS_RUM_APP_KEY` en GitLab CI/CD Variables
-2. Usa `.gitlab-ci-aspnet.yml` para aplicaciones ASP.NET (RUM incluido automáticamente)
-3. O usa `.gitlab-ci-framework.yml` (RUM opcional)
+2. Usa `.gitlab-ci-aspnet.yml` para aplicaciones ASP.NET (RUM + Server Agent automático)
+3. O usa `.gitlab-ci-framework.yml` (RUM opcional con Server Agent)
+
+**Opción 2: SOLO RUM (Sin Server Agent)**
+1. Configura `APPDYNAMICS_RUM_APP_KEY` y `APPDYNAMICS_CONTROLLER_HOST` en GitLab CI/CD Variables
+2. Usa `.gitlab-ci-rum-only.yml` (solo RUM, no requiere Server Agent)
+3. Funciona con cualquier aplicación web (ASP.NET, .NET Core, HTML estático, etc.)
 
 **Ver documentación completa:** [RUM_APPDYNAMICS.md](RUM_APPDYNAMICS.md)
 

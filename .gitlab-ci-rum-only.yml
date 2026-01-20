@@ -1,0 +1,279 @@
+# GitLab CI/CD Pipeline SOLO RUM (Real User Monitoring) - Sin Server Agent
+# Este pipeline solo configura RUM (monitoreo de frontend/browser) sin el agente de backend
+# Útil cuando solo necesitas monitorear la experiencia del usuario desde el navegador
+
+stages:
+  - build
+  - configure
+  - deploy
+
+variables:
+  BUILD_PATH: "./bin/Release"
+  RUM_SCRIPT_PATH: "./Scripts/appdynamics-rum.js"
+  
+# Nota: Este pipeline NO requiere AppDynamics Server Agent instalado
+# Solo necesita RUM Application Key de AppDynamics Controller
+
+build:
+  stage: build
+  tags:
+    - windows  # O cambiar a - linux según tu caso
+  script:
+    - echo "=== Compilando aplicación ==="
+    - echo "Nota: Este pipeline es independiente del tipo de aplicación"
+    - echo "Funciona con: ASP.NET, .NET Core, .NET Framework, o cualquier aplicación web"
+    
+    # Para .NET Framework / ASP.NET
+    # - nuget restore MyApplication.sln
+    # - msbuild MyApplication.sln /p:Configuration=Release /p:Platform="Any CPU" /t:Build
+    
+    # Para .NET Core
+    # - dotnet restore
+    # - dotnet build --configuration Release
+    
+    # Para otras aplicaciones web
+    # - echo "Compilar tu aplicación aquí según corresponda"
+    
+    - echo "=== Build completado ==="
+  artifacts:
+    paths:
+      - $BUILD_PATH
+    expire_in: 1 hour
+  only:
+    - main
+    - develop
+    - merge_requests
+
+configure_rum:
+  stage: configure
+  tags:
+    - windows  # O cambiar a - linux según tu caso
+  before_script:
+    # Verificar que las variables de CI/CD están configuradas para RUM
+    - if (-not $env:APPDYNAMICS_CONTROLLER_HOST) { throw "APPDYNAMICS_CONTROLLER_HOST no está configurado" }
+    - if (-not $env:APPDYNAMICS_RUM_APP_KEY) { throw "APPDYNAMICS_RUM_APP_KEY no está configurado (requerido para RUM)" }
+    - echo "=== Configurando SOLO RUM (sin Server Agent) ==="
+    - echo "Controller Host: $env:APPDYNAMICS_CONTROLLER_HOST"
+    - echo "RUM App Key: $env:APPDYNAMICS_RUM_APP_KEY"
+  script:
+    - echo ""
+    - echo "=== Generando script RUM de AppDynamics ==="
+    
+    # Crear directorio para scripts RUM si no existe
+    - $rumScriptsDir = "$BUILD_PATH\Scripts"
+    - if (-not (Test-Path $rumScriptsDir)) { 
+        New-Item -ItemType Directory -Path $rumScriptsDir -Force 
+        echo "Directorio de scripts RUM creado: $rumScriptsDir"
+      }
+    
+    # Variables de configuración RUM
+    - $rumControllerHost = $env:APPDYNAMICS_CONTROLLER_HOST
+    - $rumApplicationName = if ($env:APPDYNAMICS_APP_NAME) { $env:APPDYNAMICS_APP_NAME } else { "MyApplication" }
+    - $rumTierName = if ($env:APPDYNAMICS_TIER_NAME) { $env:APPDYNAMICS_TIER_NAME } else { "Frontend" }
+    - $rumAppKey = $env:APPDYNAMICS_RUM_APP_KEY
+    - $rumBeaconUrl = if ($env:APPDYNAMICS_RUM_BEACON_URL) { $env:APPDYNAMICS_RUM_BEACON_URL } else { "https://$rumControllerHost/eumcollector" }
+    
+    # Generar script RUM de AppDynamics con configuración dinámica
+    - $rumScriptPath = "$rumScriptsDir\appdynamics-rum.js"
+    
+    - @"
+// AppDynamics Real User Monitoring (RUM) JavaScript Agent
+// Generado automáticamente por GitLab CI/CD Pipeline
+// SOLO RUM - Sin Server Agent
+
+window['adrum-start-time'] = new Date().getTime();
+(function(config){
+    config.appKey = '$rumAppKey';
+    config.adrumExtUrlHttp = '$rumBeaconUrl';
+    config.adrumExtUrlHttps = '$rumBeaconUrl';
+    config.beaconUrlHttp = '$rumBeaconUrl';
+    config.beaconUrlHttps = '$rumBeaconUrl';
+    config.applicationName = '$rumApplicationName';
+    config.tierName = '$rumTierName';
+    config.xd = {
+        http: false,
+        https: false
+    };
+    config.spa = {
+        spa2: false,
+        spa2Timer: false
+    };
+    config.adrumExtUrlHttp = 'http://$rumControllerHost/eumcollector';
+    config.adrumExtUrlHttps = 'https://$rumControllerHost/eumcollector';
+})(window['adrum-config'] || (window['adrum-config'] = {}));
+
+// Cargar el script del agente RUM de AppDynamics
+(function() {
+    var script = document.createElement('script');
+    script.type = 'text/javascript';
+    script.async = true;
+    script.src = (('https:' == document.location.protocol) ? 'https://' : 'http://') + '$rumControllerHost/adrum/adrum-latest.js';
+    var firstScript = document.getElementsByTagName('script')[0];
+    firstScript.parentNode.insertBefore(script, firstScript);
+})();
+"@ | Out-File -FilePath $rumScriptPath -Encoding UTF8
+    
+    - echo "✅ Script RUM generado en: $rumScriptPath"
+    - echo "RUM Application Key: $rumAppKey"
+    - echo "RUM Beacon URL: $rumBeaconUrl"
+    - echo "Application Name: $rumApplicationName"
+    - echo "Tier Name: $rumTierName"
+    
+    # Verificar que el script RUM se creó correctamente
+    - if (Test-Path $rumScriptPath) {
+        echo "✅ appdynamics-rum.js creado exitosamente"
+        $fileSize = (Get-Item $rumScriptPath).Length
+        echo "Tamaño del archivo: $fileSize bytes"
+        echo "Primeras líneas del script:"
+        Get-Content $rumScriptPath | Select-Object -First 5
+      } else {
+        throw "❌ Error: No se pudo crear appdynamics-rum.js"
+      }
+    
+    - echo ""
+    - echo "=== Generando snippets de integración ==="
+    
+    # Snippet para ASP.NET MVC / Razor Pages
+    - $snippetAspNetPath = "$BUILD_PATH\AppDynamics-RUM-Snippet-ASP.NET.txt"
+    - @"
+<!-- AppDynamics RUM JavaScript Agent -->
+<!-- SOLO RUM - Sin Server Agent -->
+<!-- Agregar este código ANTES del cierre de </head> en tu _Layout.cshtml o Master Page -->
+
+<script src="~/Scripts/appdynamics-rum.js"></script>
+
+<!-- O usando CDN directamente: -->
+<!--
+<script>
+    window['adrum-start-time'] = new Date().getTime();
+    (function(config){
+        config.appKey = '$rumAppKey';
+        config.adrumExtUrlHttp = 'http://$rumControllerHost/eumcollector';
+        config.adrumExtUrlHttps = 'https://$rumControllerHost/eumcollector';
+        config.beaconUrlHttp = 'http://$rumControllerHost/eumcollector';
+        config.beaconUrlHttps = 'https://$rumControllerHost/eumcollector';
+        config.applicationName = '$rumApplicationName';
+        config.tierName = '$rumTierName';
+    })(window['adrum-config'] || (window['adrum-config'] = {}));
+</script>
+<script src="https://$rumControllerHost/adrum/adrum-latest.js"></script>
+-->
+"@ | Out-File -FilePath $snippetAspNetPath -Encoding UTF8
+    
+    # Snippet genérico para HTML estático o otras aplicaciones web
+    - $snippetGenericPath = "$BUILD_PATH\AppDynamics-RUM-Snippet-HTML.txt"
+    - @"
+<!-- AppDynamics RUM JavaScript Agent -->
+<!-- SOLO RUM - Sin Server Agent -->
+<!-- Agregar este código ANTES del cierre de </head> en tu página HTML principal -->
+
+<script src="/Scripts/appdynamics-rum.js"></script>
+
+<!-- O usando CDN directamente: -->
+<!--
+<script>
+    window['adrum-start-time'] = new Date().getTime();
+    (function(config){
+        config.appKey = '$rumAppKey';
+        config.adrumExtUrlHttp = 'http://$rumControllerHost/eumcollector';
+        config.adrumExtUrlHttps = 'https://$rumControllerHost/eumcollector';
+        config.beaconUrlHttp = 'http://$rumControllerHost/eumcollector';
+        config.beaconUrlHttps = 'https://$rumControllerHost/eumcollector';
+        config.applicationName = '$rumApplicationName';
+        config.tierName = '$rumTierName';
+    })(window['adrum-config'] || (window['adrum-config'] = {}));
+</script>
+<script src="https://$rumControllerHost/adrum/adrum-latest.js"></script>
+-->
+"@ | Out-File -FilePath $snippetGenericPath -Encoding UTF8
+    
+    - echo "✅ Snippets de integración generados:"
+    - echo "   - AppDynamics-RUM-Snippet-ASP.NET.txt (para ASP.NET MVC/Razor Pages)"
+    - echo "   - AppDynamics-RUM-Snippet-HTML.txt (para HTML estático o otras apps web)"
+    - echo ""
+    - echo "📋 Instrucciones:"
+    - echo "   1. Copia el snippet correspondiente a tu aplicación"
+    - echo "   2. Agrega el código ANTES del cierre de </head>"
+    - echo "   3. Asegúrate de que el script RUM esté accesible en /Scripts/appdynamics-rum.js"
+    
+  dependencies:
+    - build
+  only:
+    - main
+    - develop
+
+deploy:
+  stage: deploy
+  tags:
+    - windows  # O cambiar a - linux según tu caso
+  script:
+    - echo "=== Desplegando aplicación (SOLO RUM) ==="
+    - echo "Nota: Este pipeline NO requiere AppDynamics Server Agent instalado"
+    - echo "Solo necesitas incluir el script RUM en tu aplicación web"
+    
+    # Variables de despliegue (ajustar según tu configuración)
+    - $deployPath = "C:\inetpub\wwwroot\MyApp"
+    
+    # Para IIS / Windows
+    - if ($IsWindows -or $env:OS -like "*Windows*") {
+        # Crear directorio de despliegue si no existe
+        - if (-not (Test-Path $deployPath)) { 
+            New-Item -ItemType Directory -Path $deployPath -Force 
+            echo "Directorio de despliegue creado: $deployPath"
+          }
+        
+        # Copiar archivos al directorio de despliegue
+        - echo "=== Copiando archivos de aplicación ==="
+        - Copy-Item -Path "$BUILD_PATH\*" -Destination $deployPath -Recurse -Force
+        - echo "Archivos copiados exitosamente"
+        
+        # Verificar que los archivos RUM se copiaron
+        - $rumScriptPath = "$deployPath\Scripts\appdynamics-rum.js"
+        - if (Test-Path $rumScriptPath) {
+            echo "✅ Script RUM copiado exitosamente: $rumScriptPath"
+            echo "   Asegúrate de agregar la referencia al script en tu página HTML principal"
+          } else {
+            echo "⚠️  Advertencia: Script RUM no encontrado en: $rumScriptPath"
+            echo "   Verifica que el script se generó correctamente en el stage 'configure_rum'"
+          }
+        
+        # Para IIS: Reiniciar Application Pool si es necesario
+        - $appPoolName = "MyAppPool"
+        - if ($env:IIS_APP_POOL_NAME) { $appPoolName = $env:IIS_APP_POOL_NAME }
+        
+        - echo "=== Verificando Application Pool (opcional) ==="
+        - Import-Module WebAdministration -ErrorAction SilentlyContinue
+        - if (Get-WebAppPoolState -Name $appPoolName -ErrorAction SilentlyContinue) {
+            echo "Application Pool encontrado: $appPoolName"
+            $poolState = (Get-WebAppPoolState -Name $appPoolName).Value
+            echo "Estado actual: $poolState"
+            echo "Nota: Si hiciste cambios en archivos estáticos, considera reiniciar el Application Pool"
+            echo "Comando opcional: Stop-WebAppPool -Name $appPoolName; Start-WebAppPool -Name $appPoolName"
+          } else {
+            echo "Application Pool no encontrado o no es IIS"
+          }
+      } else {
+        # Para Linux / Otras plataformas
+        - echo "=== Despliegue en Linux / Otra plataforma ==="
+        - echo "Copia los archivos según tu método de despliegue"
+        - echo "Asegúrate de incluir: Scripts/appdynamics-rum.js"
+        - echo "Y agregar la referencia al script en tu HTML principal"
+      }
+    
+    - echo ""
+    - echo "✅ Despliegue completado"
+    - echo ""
+    - echo "📋 Próximos pasos:"
+    - echo "   1. Verificar que appdynamics-rum.js está accesible en: /Scripts/appdynamics-rum.js"
+    - echo "   2. Agregar el script RUM a tu página HTML principal (usar snippet generado)"
+    - echo "   3. Verificar que RUM está enviando datos a AppDynamics Controller"
+    - echo "   4. Revisar métricas en: AppDynamics Controller > User Experience > Browser RUM"
+    
+  dependencies:
+    - build
+    - configure_rum
+  environment:
+    name: production
+    url: https://myapp.example.com
+  only:
+    - main
