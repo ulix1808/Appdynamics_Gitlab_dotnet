@@ -97,20 +97,66 @@ deploy:
     - windows
   script:
     - echo "=== Desplegando aplicación ==="
-    - echo "Nota: Personaliza este script según tu método de despliegue"
     
-    # Ejemplo: Copiar archivos a IIS
-    # - $deployPath = "C:\inetpub\wwwroot\MyApp"
-    # - if (-not (Test-Path $deployPath)) { New-Item -ItemType Directory -Path $deployPath -Force }
-    # - Copy-Item -Path "$BUILD_PATH\*" -Destination $deployPath -Recurse -Force
+    # Variables de despliegue (ajustar según tu configuración)
+    - $deployPath = "C:\inetpub\wwwroot\MyApp"
+    - $appPoolName = "MyAppPool"
     
-    # Ejemplo: Actualizar web.config con AppDynamics si no está ya configurado
-    # - $webConfigPath = "$deployPath\web.config"
-    # - if (Test-Path $webConfigPath) {
-    #     # Aquí podrías usar XML manipulation para agregar módulos de AppDynamics
-    #   }
+    # Crear directorio de despliegue si no existe
+    - if (-not (Test-Path $deployPath)) { 
+        New-Item -ItemType Directory -Path $deployPath -Force 
+        echo "Directorio de despliegue creado: $deployPath"
+      }
     
-    - echo "✅ Despliegue completado (script de ejemplo)"
+    # Detener Application Pool antes de copiar archivos
+    - echo "=== Deteniendo Application Pool ==="
+    - Import-Module WebAdministration -ErrorAction SilentlyContinue
+    - if (Get-WebAppPoolState -Name $appPoolName -ErrorAction SilentlyContinue) {
+        Stop-WebAppPool -Name $appPoolName
+        echo "Application Pool detenido: $appPoolName"
+        Start-Sleep -Seconds 3
+      } else {
+        echo "Application Pool no encontrado: $appPoolName (continuando...)"
+      }
+    
+    # Copiar archivos al directorio de despliegue
+    - echo "=== Copiando archivos de aplicación ==="
+    - Copy-Item -Path "$BUILD_PATH\*" -Destination $deployPath -Recurse -Force
+    - echo "Archivos copiados exitosamente"
+    
+    # Actualizar web.config con AppDynamics si es necesario (opcional)
+    - $webConfigPath = "$deployPath\web.config"
+    - if (Test-Path $webConfigPath) {
+        echo "web.config encontrado en: $webConfigPath"
+        echo "Nota: Verificar que AppDynamics está configurado en web.config"
+      }
+    
+    # Reiniciar Application Pool
+    - echo "=== Reiniciando Application Pool ==="
+    - if (Get-WebAppPoolState -Name $appPoolName -ErrorAction SilentlyContinue) {
+        Start-WebAppPool -Name $appPoolName
+        echo "Application Pool iniciado: $appPoolName"
+        
+        # Esperar a que el Application Pool esté iniciado
+        Start-Sleep -Seconds 5
+        $poolState = (Get-WebAppPoolState -Name $appPoolName).Value
+        if ($poolState -eq "Started") {
+          echo "✅ Application Pool iniciado correctamente"
+        } else {
+          echo "⚠️  Application Pool en estado: $poolState"
+        }
+      } else {
+        echo "⚠️  Application Pool no encontrado: $appPoolName"
+        echo "   Asegúrate de que el nombre del Application Pool sea correcto"
+      }
+    
+    # Opcional: Reiniciar sitio web completo (más agresivo)
+    # - $websiteName = "MyWebsite"
+    # - Stop-Website -Name $websiteName
+    # - Start-Website -Name $websiteName
+    # - echo "Sitio web reiniciado: $websiteName"
+    
+    - echo "✅ Despliegue completado"
   dependencies:
     - build
     - configure_appdynamics
