@@ -53,27 +53,86 @@ El RUM App Key tiene un formato como: `AD-AAB-AAA-12345`
 
 ## 📦 Pipelines que Incluyen RUM
 
-### 1. `.gitlab-ci-aspnet.yml` (ASP.NET - RUM Incluido)
+### 1. `.gitlab-ci-rum-only.yml` (SOLO RUM - Sin Server Agent) ⭐ Nuevo
 
-Este pipeline **incluye RUM automáticamente** y es específico para aplicaciones ASP.NET:
+Este pipeline **configura SOLO RUM** sin requerir AppDynamics Server Agent instalado:
+
+```yaml
+# RUM es configurado automáticamente en el stage "configure_rum"
+# El script RUM se genera en: ./bin/Release/Scripts/appdynamics-rum.js
+# NO requiere Server Agent instalado
+```
+
+**Características:**
+- ✅ **SOLO RUM** (monitoreo de frontend/browser)
+- ✅ **NO requiere** AppDynamics Server Agent instalado
+- ✅ Funciona con cualquier aplicación web (ASP.NET, .NET Core, HTML estático, etc.)
+- ✅ Genera `appdynamics-rum.js` automáticamente
+- ✅ Genera snippets de integración para ASP.NET y HTML genérico
+- ✅ Verifica que el script RUM se copie durante el deploy
+
+**Variables Requeridas:**
+- `APPDYNAMICS_RUM_APP_KEY` - **Requerido** (RUM Application Key)
+- `APPDYNAMICS_CONTROLLER_HOST` - **Requerido** (Controller hostname)
+
+**Variables Opcionales:**
+- `APPDYNAMICS_APP_NAME` - Nombre de la aplicación (default: "MyApplication")
+- `APPDYNAMICS_TIER_NAME` - Nombre del tier (default: "Frontend")
+- `APPDYNAMICS_RUM_BEACON_URL` - URL del beacon (default: `https://{CONTROLLER_HOST}/eumcollector`)
+- `IIS_APP_POOL_NAME` - Nombre del Application Pool de IIS (solo Windows/IIS)
+
+**Cuándo Usar Este Pipeline:**
+- ✅ Solo necesitas monitoreo de frontend/browser
+- ✅ No tienes o no necesitas Server Agent instalado
+- ✅ Aplicaciones estáticas o con backend no instrumentado
+- ✅ Pruebas de RUM sin necesidad de Server Agent
+- ✅ Frontend independiente del backend
+
+**Ver archivo completo:** [.gitlab-ci-rum-only.yml](.gitlab-ci-rum-only.yml)
+
+### 2. `.gitlab-ci-aspnet.yml` (ASP.NET - RUM + Server Agent)
+
+Este pipeline **incluye RUM automáticamente** junto con Server Agent para aplicaciones ASP.NET:
 
 ```yaml
 # RUM es configurado automáticamente en el stage "configure_appdynamics"
 # El script RUM se genera en: ./bin/Release/Scripts/appdynamics-rum.js
+# Server Agent también se configura para monitoreo completo end-to-end
 ```
 
 **Características:**
+- ✅ Server Agent (monitoreo de backend)
+- ✅ RUM (monitoreo de frontend/browser)
 - ✅ Genera `appdynamics-rum.js` automáticamente
 - ✅ Incluye configuración completa de RUM
 - ✅ Genera snippet de integración para ASP.NET
 - ✅ Verifica que el script RUM se copie durante el deploy
+- ✅ Reinicio automático de Application Pool
 
-### 2. `.gitlab-ci-framework.yml` (Framework - RUM Opcional)
+**Variables Requeridas:**
+- `APPDYNAMICS_RUM_APP_KEY` - **Requerido** (RUM Application Key)
+- `APPDYNAMICS_CONTROLLER_HOST` - **Requerido** (Controller hostname)
+- `APPDYNAMICS_ACCOUNT_ACCESS_KEY` - **Requerido** (Account Access Key para Server Agent)
 
-Este pipeline **incluye RUM opcionalmente**:
+**Ideal para:** Aplicaciones web ASP.NET que requieren monitoreo completo end-to-end (backend + frontend).
+
+**Ver archivo completo:** [.gitlab-ci-aspnet.yml](.gitlab-ci-aspnet.yml)
+
+### 3. `.gitlab-ci-framework.yml` (Framework - RUM Opcional)
+
+Este pipeline **incluye RUM opcionalmente** junto con Server Agent:
 
 - Si `APPDYNAMICS_RUM_APP_KEY` está configurado → RUM se configura automáticamente
 - Si `APPDYNAMICS_RUM_APP_KEY` NO está configurado → Solo se configura Server Agent
+
+**Variables Requeridas (Server Agent):**
+- `APPDYNAMICS_CONTROLLER_HOST` - **Requerido**
+- `APPDYNAMICS_ACCOUNT_ACCESS_KEY` - **Requerido**
+
+**Variables Opcionales (RUM):**
+- `APPDYNAMICS_RUM_APP_KEY` - Si está configurado, RUM se agrega automáticamente
+
+**Ver archivo completo:** [.gitlab-ci-framework.yml](.gitlab-ci-framework.yml)
 
 ## 🚀 Integración en Aplicaciones .NET
 
