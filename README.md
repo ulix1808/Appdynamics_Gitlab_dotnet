@@ -174,6 +174,8 @@ Configurar en: **Settings > CI/CD > Variables**
 | `APPDYNAMICS_APP_NAME` | Nombre de la aplicación | ✅ | ❌ |
 | `APPDYNAMICS_TIER_NAME` | Nombre del tier | ✅ | ❌ |
 | `APPDYNAMICS_NODE_NAME` | Nombre del nodo (puede usar CI variables) | ✅ | ❌ |
+| `APPDYNAMICS_RUM_APP_KEY` | RUM Application Key (opcional, para RUM) | ✅ | ✅ |
+| `APPDYNAMICS_RUM_BEACON_URL` | RUM Beacon URL (opcional) | ✅ | ❌ |
 
 **Variables útiles de GitLab CI:**
 - `CI_COMMIT_REF_NAME` - Nombre del branch
@@ -185,15 +187,34 @@ Configurar en: **Settings > CI/CD > Variables**
 
 ## Ejemplos de Pipelines
 
-### Ejemplo 1: .NET Framework con IIS
+### Ejemplo 1: ASP.NET con RUM (Recomendado)
+
+Ver archivo: [.gitlab-ci-aspnet.yml](.gitlab-ci-aspnet.yml)
+
+**Características:**
+- ✅ Server Agent (monitoreo de backend)
+- ✅ **RUM (Real User Monitoring)** (monitoreo de frontend/browser)
+- ✅ Generación automática de scripts RUM
+- ✅ Reinicio automático de Application Pool
+
+**Ideal para:** Aplicaciones web ASP.NET que requieren monitoreo completo end-to-end.
+
+**Variables requeridas:**
+- `APPDYNAMICS_RUM_APP_KEY` - RUM Application Key de AppDynamics Controller
+
+### Ejemplo 2: .NET Framework con IIS
 
 Ver archivo: [.gitlab-ci-framework.yml](.gitlab-ci-framework.yml)
 
-### Ejemplo 2: .NET Core / .NET 5+ con Docker
+**Incluye RUM opcionalmente:**
+- Si `APPDYNAMICS_RUM_APP_KEY` está configurado → RUM se configura automáticamente
+- Si `APPDYNAMICS_RUM_APP_KEY` NO está configurado → Solo se configura Server Agent
+
+### Ejemplo 3: .NET Core / .NET 5+ con Docker
 
 Ver archivo: [.gitlab-ci-dotnet-core.yml](.gitlab-ci-dotnet-core.yml)
 
-### Ejemplo 3: .NET Core / .NET 5+ Standalone
+### Ejemplo 4: .NET Core / .NET 5+ Standalone
 
 Ver archivo: [.gitlab-ci-standalone.yml](.gitlab-ci-standalone.yml)
 
@@ -270,9 +291,32 @@ El agente puede configurarse mediante:
 
 ---
 
+## RUM (Real User Monitoring)
+
+**RUM** monitorea la experiencia del usuario desde el navegador:
+- ⏱️ Tiempo de carga de páginas
+- 🔄 Flujos de navegación
+- ❌ Errores de JavaScript
+- 🌐 Llamadas AJAX/XHR
+
+**Para habilitar RUM:**
+1. Configura `APPDYNAMICS_RUM_APP_KEY` en GitLab CI/CD Variables
+2. Usa `.gitlab-ci-aspnet.yml` para aplicaciones ASP.NET (RUM incluido automáticamente)
+3. O usa `.gitlab-ci-framework.yml` (RUM opcional)
+
+**Ver documentación completa:** [RUM_APPDYNAMICS.md](RUM_APPDYNAMICS.md)
+
+## Documentación Adicional
+
+- **Instrumentación Manual:** Ver [INSTRUMENTACION_DOTNET.md](INSTRUMENTACION_DOTNET.md)
+- **Guía Rápida:** Ver [QUICK_START.md](QUICK_START.md)
+- **RUM (Real User Monitoring):** Ver [RUM_APPDYNAMICS.md](RUM_APPDYNAMICS.md)
+- **Reinicio de IIS:** Ver [REINICIO_IIS.md](REINICIO_IIS.md)
+
 ## Referencias
 
 - [AppDynamics .NET Agent Documentation](https://docs.appdynamics.com/latest/en/application-monitoring/install-app-server-agents/net-agent)
+- [AppDynamics RUM Documentation](https://docs.appdynamics.com/latest/en/end-user-monitoring/javascript-instrumentation)
 - [GitLab CI/CD Documentation](https://docs.gitlab.com/ee/ci/)
 - [.NET Documentation](https://docs.microsoft.com/en-us/dotnet/)
 
