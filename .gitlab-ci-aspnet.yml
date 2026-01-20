@@ -1,5 +1,6 @@
-# GitLab CI/CD Pipeline para .NET Framework con AppDynamics
-# Este pipeline automatiza la instrumentación de AppDynamics para aplicaciones .NET Framework
+# GitLab CI/CD Pipeline para ASP.NET con AppDynamics (Server Agent + RUM)
+# Este pipeline automatiza la instrumentación de AppDynamics para aplicaciones ASP.NET (.NET Framework)
+# Incluye configuración de RUM (Real User Monitoring) para monitoreo de frontend
 
 stages:
   - build
@@ -10,6 +11,7 @@ variables:
   BUILD_PATH: "./bin/Release"
   APPDYNAMICS_AGENT_PATH: "C:\\AppDynamics\\AppServerAgent"
   PROJECT_SOLUTION: "MyApplication.sln"
+  RUM_SCRIPT_PATH: "./Scripts/appdynamics-rum.js"
   
 # Nota: Este pipeline requiere un GitLab Runner con tags: [windows]
 
@@ -21,7 +23,7 @@ build:
     - echo "=== Restaurando paquetes NuGet ==="
     - nuget restore $PROJECT_SOLUTION
     
-    - echo "=== Compilando aplicación ==="
+    - echo "=== Compilando aplicación ASP.NET ==="
     - msbuild $PROJECT_SOLUTION /p:Configuration=Release /p:Platform="Any CPU" /t:Build
     
     - echo "=== Build completado ==="
@@ -42,16 +44,16 @@ configure_appdynamics:
     # Verificar que las variables de CI/CD están configuradas
     - if (-not $env:APPDYNAMICS_CONTROLLER_HOST) { throw "APPDYNAMICS_CONTROLLER_HOST no está configurado" }
     - if (-not $env:APPDYNAMICS_ACCOUNT_ACCESS_KEY) { throw "APPDYNAMICS_ACCOUNT_ACCESS_KEY no está configurado" }
-    - if (-not $env:APPDYNAMICS_RUM_APP_KEY) { echo "⚠️  APPDYNAMICS_RUM_APP_KEY no está configurado (RUM será omitido)" }
+    - if (-not $env:APPDYNAMICS_RUM_APP_KEY) { throw "APPDYNAMICS_RUM_APP_KEY no está configurado (necesario para RUM)" }
   script:
-    - echo "=== Configurando AppDynamics Agent ==="
+    - echo "=== Configurando AppDynamics Server Agent ==="
     
     # Crear directorio del agente si no existe
     - if (-not (Test-Path $APPDYNAMICS_AGENT_PATH)) {
         New-Item -ItemType Directory -Path $APPDYNAMICS_AGENT_PATH -Force
       }
     
-    # Crear o actualizar controller-info.xml
+    # Crear o actualizar controller-info.xml para Server Agent
     - $controllerInfoPath = "$APPDYNAMICS_AGENT_PATH\conf\controller-info.xml"
     - $confDir = "$APPDYNAMICS_AGENT_PATH\conf"
     - if (-not (Test-Path $confDir)) { New-Item -ItemType Directory -Path $confDir -Force }
@@ -73,7 +75,7 @@ configure_appdynamics:
 </controller-info>
 "@ | Out-File -FilePath $controllerInfoPath -Encoding UTF8
     
-    - echo "AppDynamics agent configurado en: $controllerInfoPath"
+    - echo "✅ Server Agent configurado en: $controllerInfoPath"
     - echo "Controller: $env:APPDYNAMICS_CONTROLLER_HOST:$env:APPDYNAMICS_CONTROLLER_PORT"
     - echo "Application: $env:APPDYNAMICS_APP_NAME"
     - echo "Tier: $env:APPDYNAMICS_TIER_NAME"
@@ -87,27 +89,25 @@ configure_appdynamics:
         throw "❌ Error: No se pudo crear controller-info.xml"
       }
     
-    # Configurar RUM (Real User Monitoring) si está configurado
-    - if ($env:APPDYNAMICS_RUM_APP_KEY) {
-        echo ""
-        echo "=== Configurando AppDynamics RUM (Real User Monitoring) ==="
-        
-        # Crear directorio para scripts RUM si no existe
-        - $rumScriptsDir = "$BUILD_PATH\Scripts"
-        - if (-not (Test-Path $rumScriptsDir)) { 
-            New-Item -ItemType Directory -Path $rumScriptsDir -Force 
-            echo "Directorio de scripts RUM creado: $rumScriptsDir"
-          }
-        
-        # Generar script RUM de AppDynamics con configuración dinámica
-        - $rumScriptPath = "$rumScriptsDir\appdynamics-rum.js"
-        - $rumControllerHost = $env:APPDYNAMICS_CONTROLLER_HOST
-        - $rumApplicationName = $env:APPDYNAMICS_APP_NAME
-        - $rumTierName = $env:APPDYNAMICS_TIER_NAME
-        - $rumAppKey = $env:APPDYNAMICS_RUM_APP_KEY
-        - $rumBeaconUrl = if ($env:APPDYNAMICS_RUM_BEACON_URL) { $env:APPDYNAMICS_RUM_BEACON_URL } else { "https://$rumControllerHost/eumcollector" }
-        
-        - @"
+    - echo ""
+    - echo "=== Configurando AppDynamics RUM (Real User Monitoring) ==="
+    
+    # Crear directorio para scripts RUM si no existe
+    - $rumScriptsDir = "$BUILD_PATH\Scripts"
+    - if (-not (Test-Path $rumScriptsDir)) { 
+        New-Item -ItemType Directory -Path $rumScriptsDir -Force 
+        echo "Directorio de scripts RUM creado: $rumScriptsDir"
+      }
+    
+    # Generar script RUM de AppDynamics con configuración dinámica
+    - $rumScriptPath = "$rumScriptsDir\appdynamics-rum.js"
+    - $rumControllerHost = $env:APPDYNAMICS_CONTROLLER_HOST
+    - $rumApplicationName = $env:APPDYNAMICS_APP_NAME
+    - $rumTierName = $env:APPDYNAMICS_TIER_NAME
+    - $rumAppKey = $env:APPDYNAMICS_RUM_APP_KEY
+    - $rumBeaconUrl = if ($env:APPDYNAMICS_RUM_BEACON_URL) { $env:APPDYNAMICS_RUM_BEACON_URL } else { "https://$rumControllerHost/eumcollector" }
+    
+    - @"
 // AppDynamics Real User Monitoring (RUM) JavaScript Agent
 // Generado automáticamente por GitLab CI/CD Pipeline
 
@@ -142,25 +142,25 @@ window['adrum-start-time'] = new Date().getTime();
     firstScript.parentNode.insertBefore(script, firstScript);
 })();
 "@ | Out-File -FilePath $rumScriptPath -Encoding UTF8
-        
-        - echo "✅ Script RUM generado en: $rumScriptPath"
-        - echo "RUM Application Key: $rumAppKey"
-        - echo "RUM Beacon URL: $rumBeaconUrl"
-        
-        # Verificar que el script RUM se creó correctamente
-        - if (Test-Path $rumScriptPath) {
-            echo "✅ appdynamics-rum.js creado exitosamente"
-            echo "Tamaño del archivo: $((Get-Item $rumScriptPath).Length) bytes"
-          } else {
-            throw "❌ Error: No se pudo crear appdynamics-rum.js"
-          }
-        
-        - echo ""
-        - echo "=== Generando snippet para integración RUM ==="
-        - $snippetPath = "$BUILD_PATH\AppDynamics-RUM-Snippet.txt"
-        - @"
+    
+    - echo "✅ Script RUM generado en: $rumScriptPath"
+    - echo "RUM Application Key: $rumAppKey"
+    - echo "RUM Beacon URL: $rumBeaconUrl"
+    
+    # Verificar que el script RUM se creó correctamente
+    - if (Test-Path $rumScriptPath) {
+        echo "✅ appdynamics-rum.js creado exitosamente"
+        echo "Tamaño del archivo: $((Get-Item $rumScriptPath).Length) bytes"
+      } else {
+        throw "❌ Error: No se pudo crear appdynamics-rum.js"
+      }
+    
+    - echo ""
+    - echo "=== Generando snippet para _Layout.cshtml o Master Page ==="
+    - $snippetPath = "$BUILD_PATH\AppDynamics-RUM-Snippet.txt"
+    - @"
 <!-- AppDynamics RUM JavaScript Agent -->
-<!-- Agregar este código ANTES del cierre de </head> en tu página principal o Master Page -->
+<!-- Agregar este código ANTES del cierre de </head> en tu _Layout.cshtml o Master Page -->
 
 <script src="~/Scripts/appdynamics-rum.js"></script>
 
@@ -181,14 +181,10 @@ window['adrum-start-time'] = new Date().getTime();
 <script src="https://$rumControllerHost/adrum/adrum-latest.js"></script>
 -->
 "@ | Out-File -FilePath $snippetPath -Encoding UTF8
-        
-        - echo "✅ Snippet de integración generado en: $snippetPath"
-        - echo "   Instrucciones: Agregar el código al <head> de tu página principal o Master Page"
-      } else {
-        echo ""
-        echo "ℹ️  RUM no configurado: APPDYNAMICS_RUM_APP_KEY no está definido"
-        echo "   Para habilitar RUM, agrega la variable APPDYNAMICS_RUM_APP_KEY en GitLab CI/CD > Variables"
-      }
+    
+    - echo "✅ Snippet de integración generado en: $snippetPath"
+    - echo "   Instrucciones: Agregar el código al <head> de tu _Layout.cshtml o Master Page"
+    
   dependencies:
     - build
   only:
@@ -200,7 +196,7 @@ deploy:
   tags:
     - windows
   script:
-    - echo "=== Desplegando aplicación ==="
+    - echo "=== Desplegando aplicación ASP.NET ==="
     
     # Variables de despliegue (ajustar según tu configuración)
     - $deployPath = "C:\inetpub\wwwroot\MyApp"
@@ -228,11 +224,23 @@ deploy:
     - Copy-Item -Path "$BUILD_PATH\*" -Destination $deployPath -Recurse -Force
     - echo "Archivos copiados exitosamente"
     
+    # Verificar que los archivos RUM se copiaron
+    - $rumScriptPath = "$deployPath\Scripts\appdynamics-rum.js"
+    - if (Test-Path $rumScriptPath) {
+        echo "✅ Script RUM copiado exitosamente: $rumScriptPath"
+      } else {
+        echo "⚠️  Advertencia: Script RUM no encontrado en: $rumScriptPath"
+        echo "   Asegúrate de que el script RUM esté incluido en el build"
+      }
+    
     # Actualizar web.config con AppDynamics si es necesario (opcional)
     - $webConfigPath = "$deployPath\web.config"
     - if (Test-Path $webConfigPath) {
         echo "web.config encontrado en: $webConfigPath"
         echo "Nota: Verificar que AppDynamics está configurado en web.config"
+        echo "      Verificar que el script RUM está referenciado en _Layout.cshtml o Master Page"
+      } else {
+        echo "⚠️  web.config no encontrado en: $webConfigPath"
       }
     
     # Reiniciar Application Pool
@@ -260,7 +268,14 @@ deploy:
     # - Start-Website -Name $websiteName
     # - echo "Sitio web reiniciado: $websiteName"
     
+    - echo ""
     - echo "✅ Despliegue completado"
+    - echo "📋 Próximos pasos:"
+    - echo "   1. Verificar que AppDynamics Server Agent está corriendo"
+    - echo "   2. Verificar que el script RUM está incluido en _Layout.cshtml o Master Page"
+    - echo "   3. Verificar conexión con AppDynamics Controller"
+    - echo "   4. Verificar que RUM está enviando datos desde el navegador"
+    
   dependencies:
     - build
     - configure_appdynamics
