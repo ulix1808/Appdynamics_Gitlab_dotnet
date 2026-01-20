@@ -1,0 +1,169 @@
+# GitLab CI/CD Pipeline para .NET Core/.NET 5+ Standalone (sin Docker)
+# Este pipeline automatiza la instrumentación de AppDynamics para aplicaciones .NET Core desplegadas directamente
+
+stages:
+  - build
+  - test
+  - package
+  - deploy
+
+variables:
+  DOTNET_VERSION: "6.0"
+  PUBLISH_PATH: "./publish"
+
+# Build stage
+build:
+  stage: build
+  image: mcr.microsoft.com/dotnet/sdk:$DOTNET_VERSION
+  script:
+    - echo "=== Restaurando dependencias ==="
+    - dotnet restore
+    
+    - echo "=== Compilando aplicación ==="
+    - dotnet build --configuration Release --no-restore
+    
+    - echo "✅ Build completado"
+  artifacts:
+    paths:
+      - ./**/bin/Release
+      - ./**/obj/Release
+    expire_in: 1 hour
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# Test stage
+test:
+  stage: test
+  image: mcr.microsoft.com/dotnet/sdk:$DOTNET_VERSION
+  script:
+    - echo "=== Ejecutando tests ==="
+    - dotnet test --configuration Release --verbosity normal
+    - echo "✅ Tests completados"
+  dependencies:
+    - build
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# Package stage - Publicar y configurar AppDynamics
+package:
+  stage: package
+  image: mcr.microsoft.com/dotnet/sdk:$DOTNET_VERSION
+  script:
+    - echo "=== Publicando aplicación ==="
+    - dotnet publish -c Release -o $PUBLISH_PATH --no-build
+    
+    - echo "=== Configurando AppDynamics ==="
+    
+    # Verificar variables requeridas
+    - |
+      if [ -z "$APPDYNAMICS_CONTROLLER_HOST" ]; then
+        echo "ERROR: APPDYNAMICS_CONTROLLER_HOST no está configurado"
+        exit 1
+      fi
+    
+    # Crear script de configuración de variables de entorno para el despliegue
+    - |
+      cat > $PUBLISH_PATH/appdynamics-config.sh << 'SCRIPT'
+      #!/bin/bash
+      # Script de configuración de AppDynamics para .NET Core
+      
+      export APPDYNAMICS_CONTROLLER_HOST_NAME="${APPDYNAMICS_CONTROLLER_HOST}"
+      export APPDYNAMICS_CONTROLLER_PORT="${APPDYNAMICS_CONTROLLER_PORT:-8090}"
+      export APPDYNAMICS_CONTROLLER_SSL_ENABLED="${APPDYNAMICS_CONTROLLER_SSL:-false}"
+      export APPDYNAMICS_AGENT_ACCOUNT_NAME="${APPDYNAMICS_ACCOUNT_NAME}"
+      export APPDYNAMICS_AGENT_ACCOUNT_ACCESS_KEY="${APPDYNAMICS_ACCOUNT_ACCESS_KEY}"
+      export APPDYNAMICS_AGENT_APPLICATION_NAME="${APPDYNAMICS_APP_NAME}"
+      export APPDYNAMICS_AGENT_TIER_NAME="${APPDYNAMICS_TIER_NAME}"
+      export APPDYNAMICS_AGENT_NODE_NAME="${APPDYNAMICS_NODE_NAME:-${CI_COMMIT_REF_NAME}-${CI_PIPELINE_ID}}"
+      
+      echo "AppDynamics configurado:"
+      echo "  Controller: ${APPDYNAMICS_CONTROLLER_HOST_NAME}:${APPDYNAMICS_CONTROLLER_PORT}"
+      echo "  Application: ${APPDYNAMICS_AGENT_APPLICATION_NAME}"
+      echo "  Tier: ${APPDYNAMICS_AGENT_TIER_NAME}"
+      echo "  Node: ${APPDYNAMICS_AGENT_NODE_NAME}"
+      SCRIPT
+    
+    - chmod +x $PUBLISH_PATH/appdynamics-config.sh
+    
+    # Crear archivo de variables de entorno para referencia
+    - |
+      cat > $PUBLISH_PATH/.env.appdynamics << EOF
+      APPDYNAMICS_CONTROLLER_HOST_NAME=${APPDYNAMICS_CONTROLLER_HOST}
+      APPDYNAMICS_CONTROLLER_PORT=${APPDYNAMICS_CONTROLLER_PORT:-8090}
+      APPDYNAMICS_CONTROLLER_SSL_ENABLED=${APPDYNAMICS_CONTROLLER_SSL:-false}
+      APPDYNAMICS_AGENT_ACCOUNT_NAME=${APPDYNAMICS_ACCOUNT_NAME}
+      APPDYNAMICS_AGENT_ACCOUNT_ACCESS_KEY=${APPDYNAMICS_ACCOUNT_ACCESS_KEY}
+      APPDYNAMICS_AGENT_APPLICATION_NAME=${APPDYNAMICS_APP_NAME}
+      APPDYNAMICS_AGENT_TIER_NAME=${APPDYNAMICS_TIER_NAME}
+      APPDYNAMICS_AGENT_NODE_NAME=${CI_COMMIT_REF_NAME}-${CI_PIPELINE_ID}
+      EOF
+    
+    - echo "✅ Aplicación publicada con configuración de AppDynamics"
+    - echo "Variables configuradas:"
+    - cat $PUBLISH_PATH/.env.appdynamics
+    
+    # Verificar que el package AppDynamics.Agent está incluido
+    - |
+      if [ -f "$PUBLISH_PATH/*.deps.json" ]; then
+        if grep -q "AppDynamics" $PUBLISH_PATH/*.deps.json; then
+          echo "✅ AppDynamics.Agent package detectado en las dependencias"
+        else
+          echo "⚠️  ADVERTENCIA: AppDynamics.Agent no detectado en dependencias"
+        fi
+      fi
+  artifacts:
+    paths:
+      - $PUBLISH_PATH
+    expire_in: 2 hours
+  dependencies:
+    - build
+  only:
+    - main
+    - develop
+
+# Deploy stage
+deploy:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache openssh-client rsync
+    - eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan $DEPLOY_SERVER >> ~/.ssh/known_hosts
+  script:
+    - echo "=== Desplegando aplicación ==="
+    
+    # Copiar archivos al servidor
+    - rsync -avz --delete $PUBLISH_PATH/ $DEPLOY_USER@$DEPLOY_SERVER:$DEPLOY_PATH/
+    
+    # Copiar script de configuración
+    - scp $PUBLISH_PATH/appdynamics-config.sh $DEPLOY_USER@$DEPLOY_SERVER:$DEPLOY_PATH/
+    - scp $PUBLISH_PATH/.env.appdynamics $DEPLOY_USER@$DEPLOY_SERVER:$DEPLOY_PATH/
+    
+    # Ejecutar configuración y reiniciar servicio (personalizar según tu caso)
+    - |
+      ssh $DEPLOY_USER@$DEPLOY_SERVER << 'ENDSSH'
+      cd $DEPLOY_PATH
+      source ./appdynamics-config.sh
+      # Reiniciar servicio de aplicación (ajustar según tu caso)
+      # systemctl restart myapp.service
+      # O ejecutar directamente:
+      # dotnet MyApp.dll
+      echo "✅ Aplicación desplegada con AppDynamics configurado"
+      ENDSSH
+    
+    - echo "✅ Despliegue completado"
+  dependencies:
+    - package
+  environment:
+    name: production
+    url: https://myapp.example.com
+  only:
+    - main
+  when: manual

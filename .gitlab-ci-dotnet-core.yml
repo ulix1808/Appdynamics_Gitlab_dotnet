@@ -1,0 +1,165 @@
+# GitLab CI/CD Pipeline para .NET Core/.NET 5+ con AppDynamics
+# Este pipeline automatiza la instrumentación de AppDynamics para aplicaciones .NET Core usando Docker
+
+stages:
+  - build
+  - test
+  - package
+  - deploy
+
+variables:
+  DOTNET_VERSION: "6.0"
+  IMAGE_NAME: $CI_REGISTRY_IMAGE
+  IMAGE_TAG: $CI_COMMIT_REF_SLUG
+
+# Build stage
+build:
+  stage: build
+  image: mcr.microsoft.com/dotnet/sdk:$DOTNET_VERSION
+  script:
+    - echo "=== Restaurando dependencias ==="
+    - dotnet restore
+    
+    - echo "=== Compilando aplicación ==="
+    - dotnet build --configuration Release --no-restore
+    
+    - echo "=== Ejecutando tests ==="
+    - dotnet test --configuration Release --no-build --verbosity normal || true
+  artifacts:
+    paths:
+      - ./**/bin/Release
+      - ./**/obj/Release
+    expire_in: 1 hour
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# Test stage (opcional, separado del build)
+test:
+  stage: test
+  image: mcr.microsoft.com/dotnet/sdk:$DOTNET_VERSION
+  script:
+    - dotnet test --configuration Release --verbosity normal
+    - echo "✅ Tests completados"
+  dependencies:
+    - build
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# Package stage - Publicar aplicación
+package:
+  stage: package
+  image: mcr.microsoft.com/dotnet/sdk:$DOTNET_VERSION
+  script:
+    - echo "=== Publicando aplicación ==="
+    - dotnet publish -c Release -o ./publish --no-build
+    
+    - echo "=== Configurando AppDynamics (variables de entorno) ==="
+    - |
+      cat > ./publish/appdynamics.env << EOF
+      APPDYNAMICS_CONTROLLER_HOST_NAME=${APPDYNAMICS_CONTROLLER_HOST}
+      APPDYNAMICS_CONTROLLER_PORT=${APPDYNAMICS_CONTROLLER_PORT}
+      APPDYNAMICS_CONTROLLER_SSL_ENABLED=${APPDYNAMICS_CONTROLLER_SSL}
+      APPDYNAMICS_AGENT_ACCOUNT_NAME=${APPDYNAMICS_ACCOUNT_NAME}
+      APPDYNAMICS_AGENT_ACCOUNT_ACCESS_KEY=${APPDYNAMICS_ACCOUNT_ACCESS_KEY}
+      APPDYNAMICS_AGENT_APPLICATION_NAME=${APPDYNAMICS_APP_NAME}
+      APPDYNAMICS_AGENT_TIER_NAME=${APPDYNAMICS_TIER_NAME}
+      APPDYNAMICS_AGENT_NODE_NAME=${CI_COMMIT_REF_NAME}-${CI_PIPELINE_ID}
+      EOF
+    
+    - echo "✅ Aplicación publicada con configuración de AppDynamics"
+    - cat ./publish/appdynamics.env
+  artifacts:
+    paths:
+      - ./publish
+    expire_in: 2 hours
+  dependencies:
+    - build
+  only:
+    - main
+    - develop
+
+# Deploy stage - Crear imagen Docker con AppDynamics
+deploy:
+  stage: deploy
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - echo "=== Construyendo imagen Docker ==="
+    
+    # Crear Dockerfile dinámico si no existe
+    - |
+      cat > Dockerfile << 'DOCKERFILE'
+      FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION} AS base
+      WORKDIR /app
+      
+      # Instalar AppDynamics .NET Agent
+      # Nota: Ajustar según el método de instalación del agente
+      # RUN apt-get update && apt-get install -y wget unzip
+      # RUN wget -O /tmp/appd-net-agent.zip <URL_DEL_AGENTE>
+      # RUN unzip /tmp/appd-net-agent.zip -d /opt/appdynamics
+      
+      FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} AS build
+      WORKDIR /src
+      COPY ["MyApp.csproj", "./"]
+      RUN dotnet restore "MyApp.csproj"
+      COPY . .
+      WORKDIR "/src/."
+      RUN dotnet build "MyApp.csproj" -c Release -o /app/build
+      
+      FROM build AS publish
+      RUN dotnet publish "MyApp.csproj" -c Release -o /app/publish
+      
+      FROM base AS final
+      WORKDIR /app
+      COPY --from=publish /app/publish .
+      
+      # Configurar variables de entorno de AppDynamics
+      ENV APPDYNAMICS_CONTROLLER_HOST_NAME=${APPDYNAMICS_CONTROLLER_HOST}
+      ENV APPDYNAMICS_CONTROLLER_PORT=${APPDYNAMICS_CONTROLLER_PORT}
+      ENV APPDYNAMICS_CONTROLLER_SSL_ENABLED=${APPDYNAMICS_CONTROLLER_SSL}
+      ENV APPDYNAMICS_AGENT_ACCOUNT_NAME=${APPDYNAMICS_ACCOUNT_NAME}
+      ENV APPDYNAMICS_AGENT_ACCOUNT_ACCESS_KEY=${APPDYNAMICS_ACCOUNT_ACCESS_KEY}
+      ENV APPDYNAMICS_AGENT_APPLICATION_NAME=${APPDYNAMICS_APP_NAME}
+      ENV APPDYNAMICS_AGENT_TIER_NAME=${APPDYNAMICS_TIER_NAME}
+      ENV APPDYNAMICS_AGENT_NODE_NAME=${CI_COMMIT_REF_NAME}-${CI_PIPELINE_ID}
+      
+      ENTRYPOINT ["dotnet", "MyApp.dll"]
+      DOCKERFILE
+    
+    - echo "=== Construyendo imagen con AppDynamics ==="
+    - |
+      docker build \
+        --build-arg DOTNET_VERSION=$DOTNET_VERSION \
+        --build-arg APPDYNAMICS_CONTROLLER_HOST=$APPDYNAMICS_CONTROLLER_HOST \
+        --build-arg APPDYNAMICS_CONTROLLER_PORT=$APPDYNAMICS_CONTROLLER_PORT \
+        --build-arg APPDYNAMICS_CONTROLLER_SSL=$APPDYNAMICS_CONTROLLER_SSL \
+        --build-arg APPDYNAMICS_ACCOUNT_NAME=$APPDYNAMICS_ACCOUNT_NAME \
+        --build-arg APPDYNAMICS_ACCOUNT_ACCESS_KEY=$APPDYNAMICS_ACCOUNT_ACCESS_KEY \
+        --build-arg APPDYNAMICS_APP_NAME=$APPDYNAMICS_APP_NAME \
+        --build-arg APPDYNAMICS_TIER_NAME=$APPDYNAMICS_TIER_NAME \
+        --build-arg APPDYNAMICS_NODE_NAME="${CI_COMMIT_REF_NAME}-${CI_PIPELINE_ID}" \
+        -t $IMAGE_NAME:$IMAGE_TAG \
+        -t $IMAGE_NAME:latest \
+        .
+    
+    - echo "=== Subiendo imagen al registry ==="
+    - docker push $IMAGE_NAME:$IMAGE_TAG
+    - docker push $IMAGE_NAME:latest
+    
+    - echo "✅ Imagen Docker publicada exitosamente"
+    - echo "   Image: $IMAGE_NAME:$IMAGE_TAG"
+    - echo "   AppDynamics Node: ${CI_COMMIT_REF_NAME}-${CI_PIPELINE_ID}"
+  dependencies:
+    - package
+  environment:
+    name: production
+    url: https://myapp.example.com
+  only:
+    - main

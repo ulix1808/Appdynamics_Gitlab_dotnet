@@ -1,0 +1,121 @@
+# GitLab CI/CD Pipeline para .NET Framework con AppDynamics
+# Este pipeline automatiza la instrumentación de AppDynamics para aplicaciones .NET Framework
+
+stages:
+  - build
+  - configure
+  - deploy
+
+variables:
+  BUILD_PATH: "./bin/Release"
+  APPDYNAMICS_AGENT_PATH: "C:\\AppDynamics\\AppServerAgent"
+  PROJECT_SOLUTION: "MyApplication.sln"
+  
+# Nota: Este pipeline requiere un GitLab Runner con tags: [windows]
+
+build:
+  stage: build
+  tags:
+    - windows
+  script:
+    - echo "=== Restaurando paquetes NuGet ==="
+    - nuget restore $PROJECT_SOLUTION
+    
+    - echo "=== Compilando aplicación ==="
+    - msbuild $PROJECT_SOLUTION /p:Configuration=Release /p:Platform="Any CPU" /t:Build
+    
+    - echo "=== Build completado ==="
+  artifacts:
+    paths:
+      - $BUILD_PATH
+    expire_in: 1 hour
+  only:
+    - main
+    - develop
+    - merge_requests
+
+configure_appdynamics:
+  stage: configure
+  tags:
+    - windows
+  before_script:
+    # Verificar que las variables de CI/CD están configuradas
+    - if (-not $env:APPDYNAMICS_CONTROLLER_HOST) { throw "APPDYNAMICS_CONTROLLER_HOST no está configurado" }
+    - if (-not $env:APPDYNAMICS_ACCOUNT_ACCESS_KEY) { throw "APPDYNAMICS_ACCOUNT_ACCESS_KEY no está configurado" }
+  script:
+    - echo "=== Configurando AppDynamics Agent ==="
+    
+    # Crear directorio del agente si no existe
+    - if (-not (Test-Path $APPDYNAMICS_AGENT_PATH)) {
+        New-Item -ItemType Directory -Path $APPDYNAMICS_AGENT_PATH -Force
+      }
+    
+    # Crear o actualizar controller-info.xml
+    - $controllerInfoPath = "$APPDYNAMICS_AGENT_PATH\conf\controller-info.xml"
+    - $confDir = "$APPDYNAMICS_AGENT_PATH\conf"
+    - if (-not (Test-Path $confDir)) { New-Item -ItemType Directory -Path $confDir -Force }
+    
+    - $nodeName = if ($env:APPDYNAMICS_NODE_NAME) { $env:APPDYNAMICS_NODE_NAME } else { "$env:CI_COMMIT_REF_NAME-$env:CI_PIPELINE_ID" }
+    
+    - @"
+<?xml version="1.0" encoding="UTF-8"?>
+<controller-info>
+    <controller-host>$env:APPDYNAMICS_CONTROLLER_HOST</controller-host>
+    <controller-port>$env:APPDYNAMICS_CONTROLLER_PORT</controller-port>
+    <controller-ssl-enabled>$env:APPDYNAMICS_CONTROLLER_SSL</controller-ssl-enabled>
+    <account-name>$env:APPDYNAMICS_ACCOUNT_NAME</account-name>
+    <account-access-key>$env:APPDYNAMICS_ACCOUNT_ACCESS_KEY</account-access-key>
+    <application-name>$env:APPDYNAMICS_APP_NAME</application-name>
+    <tier-name>$env:APPDYNAMICS_TIER_NAME</tier-name>
+    <node-name>$nodeName</node-name>
+    <sim-enabled>false</sim-enabled>
+</controller-info>
+"@ | Out-File -FilePath $controllerInfoPath -Encoding UTF8
+    
+    - echo "AppDynamics agent configurado en: $controllerInfoPath"
+    - echo "Controller: $env:APPDYNAMICS_CONTROLLER_HOST:$env:APPDYNAMICS_CONTROLLER_PORT"
+    - echo "Application: $env:APPDYNAMICS_APP_NAME"
+    - echo "Tier: $env:APPDYNAMICS_TIER_NAME"
+    - echo "Node: $nodeName"
+    
+    # Verificar que el archivo se creó correctamente
+    - if (Test-Path $controllerInfoPath) {
+        echo "✅ controller-info.xml creado exitosamente"
+        Get-Content $controllerInfoPath | Select-Object -First 5
+      } else {
+        throw "❌ Error: No se pudo crear controller-info.xml"
+      }
+  dependencies:
+    - build
+  only:
+    - main
+    - develop
+
+deploy:
+  stage: deploy
+  tags:
+    - windows
+  script:
+    - echo "=== Desplegando aplicación ==="
+    - echo "Nota: Personaliza este script según tu método de despliegue"
+    
+    # Ejemplo: Copiar archivos a IIS
+    # - $deployPath = "C:\inetpub\wwwroot\MyApp"
+    # - if (-not (Test-Path $deployPath)) { New-Item -ItemType Directory -Path $deployPath -Force }
+    # - Copy-Item -Path "$BUILD_PATH\*" -Destination $deployPath -Recurse -Force
+    
+    # Ejemplo: Actualizar web.config con AppDynamics si no está ya configurado
+    # - $webConfigPath = "$deployPath\web.config"
+    # - if (Test-Path $webConfigPath) {
+    #     # Aquí podrías usar XML manipulation para agregar módulos de AppDynamics
+    #   }
+    
+    - echo "✅ Despliegue completado (script de ejemplo)"
+  dependencies:
+    - build
+    - configure_appdynamics
+  environment:
+    name: production
+    url: https://myapp.example.com
+  only:
+    - main

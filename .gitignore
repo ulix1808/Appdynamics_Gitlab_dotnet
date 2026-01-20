@@ -1,0 +1,42 @@
+# Build results
+bin/
+obj/
+publish/
+*.dll
+*.exe
+*.pdb
+*.cache
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Visual Studio
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+
+# AppDynamics
+*.log
+logs/
+AppServerAgent/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Variables de entorno (pueden contener credenciales)
+.env
+.env.local
+.env.*.local
+appdynamics.env
