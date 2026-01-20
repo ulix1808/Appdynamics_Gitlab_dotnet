@@ -253,13 +253,19 @@ console.log(typeof window.ADRUM);
 
 - Buscar requests a `/eumcollector` o `/adrum/adrum-latest.js`
 - Deben tener status `200 OK`
+- Los requests a `/eumcollector` indican que RUM está enviando datos
 
 ### 3. Verificar en AppDynamics Controller
 
 1. **Inicia sesión en AppDynamics Controller**
 2. **Ve a User Experience > Browser Real User Monitoring**
-3. **Selecciona tu aplicación**
+3. **Selecciona tu aplicación** (o el nombre configurado en `APPDYNAMICS_APP_NAME`)
 4. **Deberías ver métricas de usuarios navegando tu aplicación**
+
+**Nota Importante para Pipeline RUM-Only:**
+- Con `.gitlab-ci-rum-only.yml`, solo verás métricas de RUM (frontend)
+- NO verás métricas de Server Agent (backend)
+- Esto es esperado ya que solo configuras RUM, no el Server Agent
 
 ## 🔍 Troubleshooting
 
